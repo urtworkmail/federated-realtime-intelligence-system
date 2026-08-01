@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m py_compile config.py core/account_service.py api/deps.py core/connector_manager.py core/logging_service.py core/fusion_engine.py api/graph.py api/query.py api/billing.py main.py core/storage_service.py state.py)"
+    ]
+  }
+}

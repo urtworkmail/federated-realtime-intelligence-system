@@ -1,0 +1,78 @@
+version: "3.9"
+
+services:
+  neo4j:
+    image: neo4j:5.26-community
+    container_name: fris-neo4j
+    ports:
+      - "7474:7474"   # browser UI
+      - "7687:7687"   # bolt protocol
+    environment:
+      - NEO4J_AUTH=neo4j/fris_dev_password
+      - NEO4J_PLUGINS=["apoc"]
+    volumes:
+      - neo4j_data:/data
+    healthcheck:
+      # Checks the actual Bolt port the Python driver connects to, not just
+      # the HTTP browser UI — those two ports can become ready at different
+      # times. First boot installs the APOC plugin and creates the initial
+      # DB, which is slow, so the retry budget is generous (60 x 5s = 5 min).
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:7474 && cypher-shell -u neo4j -p fris_dev_password 'RETURN 1' || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 60
+      start_period: 30s
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: fris-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=fris
+      - POSTGRES_PASSWORD=fris_dev_password
+      - POSTGRES_DB=fris_control
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # -d is explicit so this checks readiness of the fris_control database
+      # specifically, not pg_isready's default (which assumes a DB named
+      # after the user and logs a harmless but confusing FATAL during boot).
+      test: ["CMD-SHELL", "pg_isready -U fris -d fris_control"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: fris-backend
+    ports:
+      - "8000:8000"
+    environment:
+      # Set to "production" (and replace both secrets below) for any real
+      # deployment — config.py refuses to boot with production + dev-default
+      # secrets, but only when FRIS_ENV=production, so local dev stays permissive.
+      - FRIS_ENV=development
+      - FRIS_NEO4J_URI=bolt://neo4j:7687
+      - FRIS_NEO4J_USER=neo4j
+      - FRIS_NEO4J_PASSWORD=fris_dev_password
+      - FRIS_CONTROL_DB_DSN=postgresql://fris:fris_dev_password@postgres:5432/fris_control
+      # Dev-only defaults — replace both in any real deployment.
+      - FRIS_SECRET_KEY=dev-only-insecure-secret-change-me
+      - FRIS_ENCRYPTION_KEY=kX9v2mZ1nY8pQ4rT6wU3sD5fG7hJ0kL2aB4cE6gI8oM=
+      - FRIS_STORAGE_ROOT=/app/data/tenant-storage
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - ./data:/app/data
+
+volumes:
+  neo4j_data:
+  postgres_data:
